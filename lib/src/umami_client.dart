@@ -8,7 +8,6 @@ import 'package:umami_flutter/src/device_info.dart';
 /// Low-level HTTP client that sends events to the Umami `/api/send` endpoint.
 ///
 /// All sends are fire-and-forget so callers are never blocked on network I/O.
-///
 /// A single [IOClient] is reused across all requests for connection pooling.
 class UmamiClient {
   final String _serverUrl;
@@ -47,21 +46,63 @@ class UmamiClient {
        );
 
   /// Track a screen (page) view.
-  void trackScreen(String screenName) {
+  ///
+  /// - [referrer]: Where the user came from — e.g. a push notification URL,
+  ///   deep link source, or in-app referrer path.
+  /// - [tag]: Optional label for campaigns or A/B test variants.
+  /// - [timestamp]: Unix milliseconds for offline event queuing. Defaults to
+  ///   the current time when omitted.
+  void trackScreen(
+    String screenName, {
+    String? referrer,
+    String? tag,
+    int? timestamp,
+  }) {
     _currentScreen = '/$screenName';
-    _send(url: _currentScreen, title: screenName);
+    _send(
+      url: _currentScreen,
+      title: screenName,
+      referrer: referrer,
+      tag: tag,
+      timestamp: timestamp,
+    );
   }
 
   /// Track a custom event with an optional data payload.
   ///
   /// The event is associated with the last screen tracked via [trackScreen].
-  void trackEvent(String eventName, {Map<String, dynamic>? data}) {
+  ///
+  /// - [data]: Arbitrary key-value map. **Do not include PII** (email, phone,
+  ///   name). Use anonymous identifiers only.
+  /// - [tag]: Optional label for campaigns or A/B test variants.
+  /// - [timestamp]: Unix milliseconds for offline event queuing.
+  void trackEvent(
+    String eventName, {
+    Map<String, dynamic>? data,
+    String? tag,
+    int? timestamp,
+  }) {
     _send(
       url: _currentScreen,
       title: eventName,
       eventName: eventName,
       data: data,
+      tag: tag,
+      timestamp: timestamp,
     );
+  }
+
+  /// Associates the current session with custom properties.
+  ///
+  /// Use [identify] to attach non-PII attributes to a session — for example
+  /// a plan tier, user role, or app version. **Never send PII** (name, email,
+  /// phone number, address) as Umami stores identify data persistently.
+  ///
+  /// ```dart
+  /// UmamiClient.identify({'plan': 'pro', 'role': 'admin'});
+  /// ```
+  void identify(Map<String, dynamic> sessionData) {
+    _sendRaw(type: 'identify', payload: {'data': sessionData});
   }
 
   /// Releases the underlying HTTP client. Call when analytics are no longer needed.
@@ -74,9 +115,10 @@ class UmamiClient {
     required String title,
     String? eventName,
     Map<String, dynamic>? data,
+    String? referrer,
+    String? tag,
+    int? timestamp,
   }) {
-    final endpoint = Uri.parse('$_serverUrl/api/send');
-
     final payload = <String, dynamic>{
       'website': _websiteId,
       'hostname': _hostname,
@@ -85,14 +127,30 @@ class UmamiClient {
       'screen': _deviceInfo.screenResolution,
       'language': _deviceInfo.locale,
       'id': _deviceInfo.deviceId,
+      if (referrer != null) 'referrer': referrer,
+      if (tag != null) 'tag': tag,
+      if (eventName != null) 'name': eventName,
+      if (data != null) 'data': data,
+      if (timestamp != null) 'timestamp': timestamp,
     };
 
-    if (eventName != null) payload['name'] = eventName;
-    if (data != null) payload['data'] = data;
+    _sendRaw(type: 'event', payload: payload);
+  }
 
-    _log?.call('[UmamiFlutter] Sending: $title');
+  void _sendRaw({
+    required String type,
+    required Map<String, dynamic> payload,
+  }) {
+    // Inject common fields that apply to all types.
+    final fullPayload = <String, dynamic>{
+      'website': _websiteId,
+      ...payload,
+    };
 
-    final body = jsonEncode({'type': 'event', 'payload': payload});
+    final body = jsonEncode({'type': type, 'payload': fullPayload});
+    final endpoint = Uri.parse('$_serverUrl/api/send');
+
+    _log?.call('[UmamiFlutter] → $type ${payload['name'] ?? payload['url'] ?? ''}');
 
     _client
         .post(
@@ -105,18 +163,15 @@ class UmamiClient {
         )
         .timeout(_timeout)
         .then((_) {
-          _log?.call('[UmamiFlutter] Sent: $title');
+          _log?.call('[UmamiFlutter] ✓ $type sent');
         })
         .catchError((Object e) {
-          _log?.call('[UmamiFlutter] Failed: $e');
+          _log?.call('[UmamiFlutter] ✗ $type failed: $e');
           _onError?.call(e);
         });
   }
 
   /// Platform-aware User-Agent so Umami recognises the OS.
-  ///
-  /// Uses realistic browser UA strings because Umami parses the User-Agent
-  /// header to populate OS / browser / device-type fields.
   static String _defaultUserAgent() {
     if (Platform.isAndroid) {
       return 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '

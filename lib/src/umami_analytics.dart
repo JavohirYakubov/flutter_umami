@@ -6,29 +6,26 @@ import 'package:umami_flutter/src/umami_client.dart';
 
 /// Lightweight Umami analytics for Flutter.
 ///
-/// Provides a simple static API for integrating
-/// [Umami](https://umami.is) analytics into any Flutter app.
-///
-/// **Initialization** is non-blocking — [init] returns immediately while
-/// device-info collection happens in the background. Events tracked before
-/// init completes are automatically queued and flushed once the client is
-/// ready.
-///
 /// ```dart
-/// // At app startup (returns immediately, never blocks):
+/// // At startup (returns immediately):
 /// UmamiAnalytics.init(
 ///   websiteId: 'your-website-id',
 ///   serverUrl: 'https://your-umami.example.com',
 ///   hostname: 'myapp',
 /// );
 ///
-/// // Track events at any time — even before init finishes:
-/// UmamiAnalytics.trackScreen('HomeScreen');
-/// UmamiAnalytics.trackEvent('purchase', data: {'plan': 'pro'});
+/// // Auto-track screens:
+/// MaterialApp(navigatorObservers: [UmamiObserver()]);
 ///
-/// // GDPR / user opt-out:
-/// UmamiAnalytics.setEnabled(false); // stops all tracking
-/// UmamiAnalytics.setEnabled(true);  // resumes tracking
+/// // Manual tracking:
+/// UmamiAnalytics.trackScreen('HomeScreen', referrer: 'push://promo');
+/// UmamiAnalytics.trackEvent('purchase', data: {'plan': 'pro'}, tag: 'summer_sale');
+///
+/// // Identify session (no PII!):
+/// UmamiAnalytics.identify({'plan': 'pro', 'role': 'admin'});
+///
+/// // GDPR opt-out:
+/// UmamiAnalytics.setEnabled(false);
 /// ```
 class UmamiAnalytics {
   UmamiAnalytics._();
@@ -41,45 +38,25 @@ class UmamiAnalytics {
   /// Whether [init] has been called and has not yet failed.
   static bool get isInitialized => _ready != null;
 
-  /// Whether tracking is currently enabled.
-  ///
-  /// Use [setEnabled] to toggle. Defaults to `true`.
+  /// Whether tracking is currently enabled. See [setEnabled].
   static bool get isEnabled => _enabled;
 
   /// Enables or disables all tracking (e.g. for GDPR consent).
   ///
-  /// When set to `false`, [trackScreen] and [trackEvent] are silently ignored.
-  /// The analytics client remains initialized so tracking resumes immediately
-  /// when re-enabled without another [init] call.
+  /// When `false`, all track/identify calls are silently ignored.
+  /// The client stays initialized so tracking resumes instantly on re-enable.
   static void setEnabled(bool value) {
     _enabled = value;
     _log?.call('[UmamiFlutter] Tracking ${value ? 'enabled' : 'disabled'}');
   }
 
-  /// Kicks off device-info collection in the background.
+  /// Initializes Umami analytics.
   ///
-  /// Returns immediately — never blocks the caller. Events tracked before
-  /// init completes are automatically queued and flushed once ready.
+  /// Returns immediately — device-info collection runs in the background.
+  /// Events tracked before init completes are queued and flushed automatically.
   ///
-  /// Can be called again after a previous failure to retry initialization.
-  /// Calling [init] while a previous init is already successfully completed
-  /// is a no-op (a warning is logged if logging is enabled).
-  ///
-  /// Parameters:
-  /// - [websiteId]: The website ID from your Umami dashboard.
-  /// - [serverUrl]: The base URL of your Umami server
-  ///   (e.g. `https://analytics.example.com`).
-  /// - [hostname]: A logical hostname for this app (e.g. `myapp`).
-  /// - [enableLogging]: If `true`, prints debug messages to the console.
-  ///   Defaults to `false`.
-  /// - [onError]: Optional callback invoked when init or event sending fails.
-  ///   Useful for monitoring analytics health in production.
-  /// - [userAgent]: Optional custom User-Agent string. If omitted, a
-  ///   platform-appropriate browser User-Agent is used so Umami can
-  ///   recognise the OS.
-  /// - [recordFirstOpen]: If `true`, automatically sends a `first_open` event
-  ///   when the app is opened for the first time on this device.
-  ///   Defaults to `false`.
+  /// Calling [init] while already initialized is a no-op.
+  /// Can be retried after a failure.
   static void init({
     required String websiteId,
     required String serverUrl,
@@ -122,7 +99,6 @@ class UmamiAnalytics {
   }) async {
     try {
       final start = DateTime.now();
-
       final deviceInfo = await DeviceInfoService.gather();
 
       final client = UmamiClient(
@@ -156,43 +132,85 @@ class UmamiAnalytics {
 
   /// Tracks a screen (page) view.
   ///
-  /// [screenName] is sent as the page URL path and title in Umami.
-  /// Subsequent [trackEvent] calls are associated with this screen.
+  /// - [referrer]: Source of navigation — e.g. `'push://promo'`,
+  ///   `'/previous-screen'`, or a deep link URL.
+  /// - [tag]: Campaign or A/B test label (e.g. `'summer_sale'`).
+  /// - [timestamp]: Unix milliseconds — for offline event queuing.
   ///
-  /// Safe to call before [init] completes — the event is queued automatically.
-  /// If [init] has not been called, or tracking is disabled, the call is a no-op.
-  static void trackScreen(String screenName) {
+  /// Subsequent [trackEvent] calls are automatically associated with this screen.
+  static void trackScreen(
+    String screenName, {
+    String? referrer,
+    String? tag,
+    int? timestamp,
+  }) {
     if (!_enabled) return;
     final completer = _ready;
     if (completer == null) return;
     completer.future
-        .then((c) => c.trackScreen(screenName))
+        .then((c) => c.trackScreen(
+              screenName,
+              referrer: referrer,
+              tag: tag,
+              timestamp: timestamp,
+            ))
         .catchError((_) {});
   }
 
   /// Tracks a custom event with an optional [data] payload.
   ///
-  /// [eventName] appears as the event name in the Umami dashboard.
-  /// [data] is an arbitrary key-value map attached to the event.
+  /// - [data]: Key-value map. **Do not include PII** (email, phone, name).
+  /// - [tag]: Campaign or A/B test label.
+  /// - [timestamp]: Unix milliseconds — for offline event queuing.
   ///
   /// The event is associated with the last screen tracked via [trackScreen].
-  ///
-  /// Safe to call before [init] completes — the event is queued automatically.
-  /// If [init] has not been called, or tracking is disabled, the call is a no-op.
-  static void trackEvent(String eventName, {Map<String, dynamic>? data}) {
+  static void trackEvent(
+    String eventName, {
+    Map<String, dynamic>? data,
+    String? tag,
+    int? timestamp,
+  }) {
     if (!_enabled) return;
     final completer = _ready;
     if (completer == null) return;
     completer.future
-        .then((c) => c.trackEvent(eventName, data: data))
+        .then((c) => c.trackEvent(
+              eventName,
+              data: data,
+              tag: tag,
+              timestamp: timestamp,
+            ))
+        .catchError((_) {});
+  }
+
+  /// Associates the current session with non-PII properties.
+  ///
+  /// Use this to attach plan tier, role, app version, or other anonymous
+  /// attributes to a session so you can filter analytics by segment.
+  ///
+  /// **Security rule:** never send PII — no names, emails, phone numbers,
+  /// or any data that could identify a real person. Use opaque IDs or
+  /// categorical values only.
+  ///
+  /// ```dart
+  /// UmamiAnalytics.identify({
+  ///   'plan': 'pro',
+  ///   'role': 'admin',
+  ///   'app_version': '2.1.0',
+  /// });
+  /// ```
+  static void identify(Map<String, dynamic> sessionData) {
+    if (!_enabled) return;
+    final completer = _ready;
+    if (completer == null) return;
+    completer.future
+        .then((c) => c.identify(sessionData))
         .catchError((_) {});
   }
 
   /// Releases the underlying HTTP client.
   ///
-  /// After calling [dispose], [init] must be called again before tracking
-  /// can resume. Primarily useful when the analytics lifecycle is tied to
-  /// a specific widget or service scope.
+  /// After [dispose], call [init] again before tracking resumes.
   static void dispose() {
     _ready?.future.then((c) => c.dispose()).catchError((_) {});
     _ready = null;
@@ -200,9 +218,7 @@ class UmamiAnalytics {
     _onError = null;
   }
 
-  /// Resets all state, allowing [init] to be called again.
-  ///
-  /// This is primarily useful for testing.
+  /// Resets all state. Primarily useful for testing.
   static void reset() {
     _ready?.future.then((c) => c.dispose()).catchError((_) {});
     _ready = null;
