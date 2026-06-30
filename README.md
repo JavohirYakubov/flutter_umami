@@ -248,6 +248,43 @@ MaterialApp(
 
 Named routes are tracked by name (e.g. `/home`). Anonymous routes fall back to the widget's `runtimeType`.
 
+### `DeviceIdService`
+
+Resolves and persists a stable device ID across sessions.
+
+| Member | Type | Description |
+|---|---|---|
+| `DeviceIdService.getId()` | `Future<String>` | Returns the persistent device ID. Reads from secure storage; generates and saves a new UUID on first call. |
+| `DeviceIdService.isFirstLaunch` | `bool` | `true` if the device ID was freshly generated on this call — meaning the app has never been opened before (or was reinstalled on Android). |
+
+```dart
+final id = await DeviceIdService.getId();
+if (DeviceIdService.isFirstLaunch) {
+  // First time this app has run on this device
+}
+```
+
+> **Platform notes for `recordFirstOpen` / `isFirstLaunch`:**
+> - **iOS / macOS** — device ID is stored in Keychain, which survives app reinstalls. `first_open` fires only once per device, ever.
+> - **Android** — secure storage is cleared on uninstall. Reinstalling the app **will trigger `first_open` again**.
+> - **Windows** — secure storage survives reinstalls; fires only once.
+
+### Init failure & retry
+
+If `init()` fails (e.g. device-info plugin unavailable), the internal state is reset automatically so you can retry:
+
+```dart
+UmamiAnalytics.init(
+  websiteId: 'your-id',
+  serverUrl: 'https://your-umami.com',
+  hostname: 'myapp',
+  onError: (e) {
+    // init failed — safe to call init() again later
+    debugPrint('Analytics init failed: $e');
+  },
+);
+```
+
 ---
 
 ## Architecture
