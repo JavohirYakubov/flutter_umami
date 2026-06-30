@@ -13,11 +13,18 @@
 ///   hostname: 'myapp',
 /// );
 ///
-/// // Track at any time:
+/// // Auto-track screens via MaterialApp:
+/// MaterialApp(navigatorObservers: [UmamiObserver()]);
+///
+/// // Or track manually:
 /// UmamiAnalytics.trackScreen('HomeScreen');
 /// UmamiAnalytics.trackEvent('purchase', data: {'plan': 'pro'});
+///
+/// // GDPR opt-out:
+/// UmamiAnalytics.setEnabled(false);
 /// ```
 library;
 
 export 'src/umami_analytics.dart';
+export 'src/umami_observer.dart';
 export 'src/device_id_service.dart' show DeviceIdService;

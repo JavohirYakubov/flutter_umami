@@ -20,16 +20,11 @@ class UmamiClient {
   final String _userAgent;
   final IOClient _client;
 
-  /// Creates an [UmamiClient] that sends events to [serverUrl].
-  ///
-  /// - [serverUrl]: Base URL of the Umami instance (no trailing slash).
-  /// - [websiteId]: The website ID from the Umami dashboard.
-  /// - [hostname]: Logical hostname for this app.
-  /// - [deviceInfo]: Pre-collected device metadata.
-  /// - [log]: Optional debug logger.
-  /// - [onError]: Optional error callback for monitoring.
-  /// - [userAgent]: Custom User-Agent string. If `null`, a platform-appropriate
-  ///   browser UA is used so Umami can recognise the OS.
+  // Tracks the last visited screen so events are associated with it.
+  String _currentScreen = '/';
+
+  static const Duration _timeout = Duration(seconds: 10);
+
   UmamiClient({
     required String serverUrl,
     required String websiteId,
@@ -45,17 +40,32 @@ class UmamiClient {
        _log = log,
        _onError = onError,
        _userAgent = userAgent ?? _defaultUserAgent(),
-       _client = IOClient(HttpClient()..userAgent = null);
+       _client = IOClient(
+         HttpClient()
+           ..userAgent = null
+           ..connectionTimeout = _timeout,
+       );
 
   /// Track a screen (page) view.
   void trackScreen(String screenName) {
-    _send(url: '/$screenName', title: screenName);
+    _currentScreen = '/$screenName';
+    _send(url: _currentScreen, title: screenName);
   }
 
   /// Track a custom event with an optional data payload.
+  ///
+  /// The event is associated with the last screen tracked via [trackScreen].
   void trackEvent(String eventName, {Map<String, dynamic>? data}) {
-    _send(url: '/', title: eventName, eventName: eventName, data: data);
+    _send(
+      url: _currentScreen,
+      title: eventName,
+      eventName: eventName,
+      data: data,
+    );
   }
+
+  /// Releases the underlying HTTP client. Call when analytics are no longer needed.
+  void dispose() => _client.close();
 
   // ── Internals ──────────────────────────────────────────────────────────
 
@@ -93,6 +103,7 @@ class UmamiClient {
           },
           body: body,
         )
+        .timeout(_timeout)
         .then((_) {
           _log?.call('[UmamiFlutter] Sent: $title');
         })

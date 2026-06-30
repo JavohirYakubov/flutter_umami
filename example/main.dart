@@ -6,12 +6,12 @@ import 'package:umami_flutter/umami_flutter.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Umami analytics — returns immediately, never blocks.
   UmamiAnalytics.init(
     websiteId: 'your-website-id',
     serverUrl: 'https://your-umami.example.com',
     hostname: 'example_app',
     enableLogging: true,
+    recordFirstOpen: true,
     onError: (error) => print('Analytics error: $error'),
   );
 
@@ -25,7 +25,13 @@ class ExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Umami Flutter Example',
-      home: const HomeScreen(),
+      // UmamiObserver automatically tracks every named route change.
+      navigatorObservers: [UmamiObserver()],
+      initialRoute: '/home',
+      routes: {
+        '/home': (_) => const HomeScreen(),
+        '/detail': (_) => const DetailScreen(),
+      },
     );
   }
 }
@@ -35,23 +41,62 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Track this screen view
-    UmamiAnalytics.trackScreen('HomeScreen');
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Umami Flutter Example')),
+      appBar: AppBar(title: const Text('Home')),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                // Track a custom event with data
+                UmamiAnalytics.trackEvent(
+                  'button_tap',
+                  data: {'button': 'go_to_detail'},
+                );
+                Navigator.pushNamed(context, '/detail');
+              },
+              child: const Text('Go to Detail'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () {
+                // GDPR: disable tracking
+                UmamiAnalytics.setEnabled(false);
+                print('Tracking disabled');
+              },
+              child: const Text('Opt out'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                UmamiAnalytics.setEnabled(true);
+                print('Tracking enabled');
+              },
+              child: const Text('Opt in'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DetailScreen extends StatelessWidget {
+  const DetailScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Detail')),
       body: Center(
         child: ElevatedButton(
           onPressed: () {
             UmamiAnalytics.trackEvent(
-              'button_tap',
-              data: {
-                'button': 'example',
-                'timestamp': DateTime.now().toIso8601String(),
-              },
+              'purchase',
+              data: {'plan': 'pro', 'price': 9.99},
             );
           },
-          child: const Text('Track Event'),
+          child: const Text('Track Purchase'),
         ),
       ),
     );

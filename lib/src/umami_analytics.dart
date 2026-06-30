@@ -25,6 +25,10 @@ import 'package:umami_flutter/src/umami_client.dart';
 /// // Track events at any time — even before init finishes:
 /// UmamiAnalytics.trackScreen('HomeScreen');
 /// UmamiAnalytics.trackEvent('purchase', data: {'plan': 'pro'});
+///
+/// // GDPR / user opt-out:
+/// UmamiAnalytics.setEnabled(false); // stops all tracking
+/// UmamiAnalytics.setEnabled(true);  // resumes tracking
 /// ```
 class UmamiAnalytics {
   UmamiAnalytics._();
@@ -32,9 +36,25 @@ class UmamiAnalytics {
   static Completer<UmamiClient>? _ready;
   static void Function(String)? _log;
   static void Function(Object error)? _onError;
+  static bool _enabled = true;
 
   /// Whether [init] has been called and has not yet failed.
   static bool get isInitialized => _ready != null;
+
+  /// Whether tracking is currently enabled.
+  ///
+  /// Use [setEnabled] to toggle. Defaults to `true`.
+  static bool get isEnabled => _enabled;
+
+  /// Enables or disables all tracking (e.g. for GDPR consent).
+  ///
+  /// When set to `false`, [trackScreen] and [trackEvent] are silently ignored.
+  /// The analytics client remains initialized so tracking resumes immediately
+  /// when re-enabled without another [init] call.
+  static void setEnabled(bool value) {
+    _enabled = value;
+    _log?.call('[UmamiFlutter] Tracking ${value ? 'enabled' : 'disabled'}');
+  }
 
   /// Kicks off device-info collection in the background.
   ///
@@ -69,7 +89,6 @@ class UmamiAnalytics {
     String? userAgent,
     bool recordFirstOpen = false,
   }) {
-    // Guard: already initialised successfully — skip.
     if (_ready != null && _ready!.isCompleted) {
       if (enableLogging) {
         // ignore: avoid_print
@@ -79,14 +98,10 @@ class UmamiAnalytics {
     }
 
     _onError = onError;
+    _log = enableLogging
+        ? (msg) => print(msg) // ignore: avoid_print
+        : null;
 
-    if (enableLogging) {
-      _log = (msg) => print(msg); // ignore: avoid_print
-    } else {
-      _log = null;
-    }
-
-    // Create a fresh completer (handles both first-init and retry-after-failure).
     _ready = Completer<UmamiClient>();
 
     _initAsync(
@@ -122,7 +137,6 @@ class UmamiAnalytics {
 
       _ready!.complete(client);
 
-      // If first launch and tracking is enabled, fire the event
       if (recordFirstOpen && DeviceIdService.isFirstLaunch) {
         client.trackEvent('first_open');
         _log?.call('[UmamiFlutter] Tracked first_open event');
@@ -136,23 +150,24 @@ class UmamiAnalytics {
     } catch (e) {
       _log?.call('[UmamiFlutter] Init failed: $e');
       _onError?.call(e);
-      // Reset so init() can be retried.
       _ready = null;
     }
   }
 
   /// Tracks a screen (page) view.
   ///
-  /// [screenName] is sent as both the page URL path and title in Umami.
+  /// [screenName] is sent as the page URL path and title in Umami.
+  /// Subsequent [trackEvent] calls are associated with this screen.
   ///
   /// Safe to call before [init] completes — the event is queued automatically.
-  /// If [init] has not been called at all, the event is silently dropped.
+  /// If [init] has not been called, or tracking is disabled, the call is a no-op.
   static void trackScreen(String screenName) {
+    if (!_enabled) return;
     final completer = _ready;
     if (completer == null) return;
     completer.future
         .then((c) => c.trackScreen(screenName))
-        .catchError((_) {}); // best-effort
+        .catchError((_) {});
   }
 
   /// Tracks a custom event with an optional [data] payload.
@@ -160,23 +175,39 @@ class UmamiAnalytics {
   /// [eventName] appears as the event name in the Umami dashboard.
   /// [data] is an arbitrary key-value map attached to the event.
   ///
+  /// The event is associated with the last screen tracked via [trackScreen].
+  ///
   /// Safe to call before [init] completes — the event is queued automatically.
-  /// If [init] has not been called at all, the event is silently dropped.
+  /// If [init] has not been called, or tracking is disabled, the call is a no-op.
   static void trackEvent(String eventName, {Map<String, dynamic>? data}) {
+    if (!_enabled) return;
     final completer = _ready;
     if (completer == null) return;
     completer.future
         .then((c) => c.trackEvent(eventName, data: data))
-        .catchError((_) {}); // best-effort
+        .catchError((_) {});
   }
 
-  /// Resets the analytics client, allowing [init] to be called again.
+  /// Releases the underlying HTTP client.
   ///
-  /// This is primarily useful for testing. In production, prefer letting
-  /// [init] handle retries automatically.
-  static void reset() {
+  /// After calling [dispose], [init] must be called again before tracking
+  /// can resume. Primarily useful when the analytics lifecycle is tied to
+  /// a specific widget or service scope.
+  static void dispose() {
+    _ready?.future.then((c) => c.dispose()).catchError((_) {});
     _ready = null;
     _log = null;
     _onError = null;
+  }
+
+  /// Resets all state, allowing [init] to be called again.
+  ///
+  /// This is primarily useful for testing.
+  static void reset() {
+    _ready?.future.then((c) => c.dispose()).catchError((_) {});
+    _ready = null;
+    _log = null;
+    _onError = null;
+    _enabled = true;
   }
 }

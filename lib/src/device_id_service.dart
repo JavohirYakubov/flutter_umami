@@ -16,7 +16,7 @@ class DeviceIdService {
     iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
   );
   static final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
-  static final Uuid _uuid = Uuid();
+  static const Uuid _uuid = Uuid();
 
   /// In-memory cache to avoid repeated I/O.
   static String? _cachedId;

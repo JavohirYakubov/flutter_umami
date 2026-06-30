@@ -22,7 +22,7 @@ void main() {
       expect(result, contains('1080x1920'));
     });
 
-    test('equality via field values', () {
+    test('equality: same values are equal', () {
       const a = DeviceInfo(
         deviceId: 'id-1',
         locale: 'en',
@@ -34,20 +34,33 @@ void main() {
         screenResolution: '100x200',
       );
 
-      // DeviceInfo doesn't override ==, so they are not equal by identity
-      expect(a.deviceId, equals(b.deviceId));
-      expect(a.locale, equals(b.locale));
-      expect(a.screenResolution, equals(b.screenResolution));
+      expect(a, equals(b));
+      expect(a.hashCode, equals(b.hashCode));
+    });
+
+    test('equality: different values are not equal', () {
+      const a = DeviceInfo(
+        deviceId: 'id-1',
+        locale: 'en',
+        screenResolution: '100x200',
+      );
+      const b = DeviceInfo(
+        deviceId: 'id-2',
+        locale: 'en',
+        screenResolution: '100x200',
+      );
+
+      expect(a, isNot(equals(b)));
     });
   });
 
   // ── UmamiClient Payload Tests ──────────────────────────────────────────
 
   group('UmamiClient payload construction', () {
-    test('trackScreen builds correct URL path', () {
-      // We can't easily intercept HTTP without a mock server,
-      // but we can verify the public API doesn't throw.
-      final client = UmamiClient(
+    late UmamiClient client;
+
+    setUp(() {
+      client = UmamiClient(
         serverUrl: 'https://example.com',
         websiteId: 'test-site',
         hostname: 'testapp',
@@ -57,31 +70,27 @@ void main() {
           screenResolution: '375x812',
         ),
       );
+    });
 
-      // Should not throw — sends are fire-and-forget with catchError
+    tearDown(() => client.dispose());
+
+    test('trackScreen does not throw', () {
       expect(() => client.trackScreen('HomeScreen'), returnsNormally);
     });
 
     test('trackEvent with data does not throw', () {
-      final client = UmamiClient(
-        serverUrl: 'https://example.com',
-        websiteId: 'test-site',
-        hostname: 'testapp',
-        deviceInfo: const DeviceInfo(
-          deviceId: 'dev-123',
-          locale: 'en_US',
-          screenResolution: '375x812',
-        ),
-      );
-
       expect(
         () => client.trackEvent('purchase', data: {'plan': 'pro'}),
         returnsNormally,
       );
     });
 
+    test('trackEvent without data does not throw', () {
+      expect(() => client.trackEvent('login'), returnsNormally);
+    });
+
     test('custom userAgent is accepted', () {
-      final client = UmamiClient(
+      final c = UmamiClient(
         serverUrl: 'https://example.com',
         websiteId: 'test-site',
         hostname: 'testapp',
@@ -92,14 +101,13 @@ void main() {
         ),
         userAgent: 'CustomAgent/1.0',
       );
-
-      // Should not throw
-      expect(() => client.trackScreen('Test'), returnsNormally);
+      expect(() => c.trackScreen('Test'), returnsNormally);
+      c.dispose();
     });
 
     test('onError callback is accepted', () {
       final errors = <Object>[];
-      final client = UmamiClient(
+      final c = UmamiClient(
         serverUrl: 'https://example.com',
         websiteId: 'test-site',
         hostname: 'testapp',
@@ -110,21 +118,30 @@ void main() {
         ),
         onError: errors.add,
       );
-
-      // Should not throw even with invalid server
-      expect(() => client.trackScreen('Test'), returnsNormally);
+      expect(() => c.trackScreen('Test'), returnsNormally);
+      c.dispose();
     });
   });
 
   // ── UmamiAnalytics Static API Tests ────────────────────────────────────
 
   group('UmamiAnalytics', () {
-    setUp(() {
-      UmamiAnalytics.reset();
-    });
+    setUp(() => UmamiAnalytics.reset());
+    tearDown(() => UmamiAnalytics.reset());
 
     test('isInitialized is false before init', () {
       expect(UmamiAnalytics.isInitialized, isFalse);
+    });
+
+    test('isEnabled defaults to true', () {
+      expect(UmamiAnalytics.isEnabled, isTrue);
+    });
+
+    test('setEnabled toggles tracking', () {
+      UmamiAnalytics.setEnabled(false);
+      expect(UmamiAnalytics.isEnabled, isFalse);
+      UmamiAnalytics.setEnabled(true);
+      expect(UmamiAnalytics.isEnabled, isTrue);
     });
 
     test('trackScreen before init does not throw', () {
@@ -138,10 +155,25 @@ void main() {
       );
     });
 
+    test('trackScreen when disabled does not throw', () {
+      UmamiAnalytics.setEnabled(false);
+      expect(() => UmamiAnalytics.trackScreen('Test'), returnsNormally);
+    });
+
+    test('trackEvent when disabled does not throw', () {
+      UmamiAnalytics.setEnabled(false);
+      expect(() => UmamiAnalytics.trackEvent('test'), returnsNormally);
+    });
+
     test('reset clears initialization state', () {
-      // Can't fully test init without a real device, but we can test reset
       UmamiAnalytics.reset();
       expect(UmamiAnalytics.isInitialized, isFalse);
+    });
+
+    test('reset restores isEnabled to true', () {
+      UmamiAnalytics.setEnabled(false);
+      UmamiAnalytics.reset();
+      expect(UmamiAnalytics.isEnabled, isTrue);
     });
 
     test('init sets isInitialized to true', () {
@@ -150,18 +182,15 @@ void main() {
         serverUrl: 'https://example.com',
         hostname: 'test',
       );
-
       expect(UmamiAnalytics.isInitialized, isTrue);
     });
 
-    test('double init does not throw', () {
+    test('double init is a no-op and does not throw', () {
       UmamiAnalytics.init(
         websiteId: 'test',
         serverUrl: 'https://example.com',
         hostname: 'test',
       );
-
-      // Second call should be a no-op, not throw
       expect(
         () => UmamiAnalytics.init(
           websiteId: 'test2',
@@ -174,8 +203,6 @@ void main() {
 
     test('onError callback is wired through', () {
       final errors = <Object>[];
-
-      // Should not throw
       expect(
         () => UmamiAnalytics.init(
           websiteId: 'test',
@@ -186,19 +213,27 @@ void main() {
         returnsNormally,
       );
     });
+
+    test('dispose does not throw', () {
+      UmamiAnalytics.init(
+        websiteId: 'test',
+        serverUrl: 'https://example.com',
+        hostname: 'test',
+      );
+      expect(() => UmamiAnalytics.dispose(), returnsNormally);
+    });
   });
 
   // ── JSON Payload Structure Tests ───────────────────────────────────────
 
   group('Payload JSON structure', () {
-    test('event payload has required fields', () {
+    test('screen payload has required fields', () {
       const info = DeviceInfo(
         deviceId: 'dev-123',
         locale: 'en_US',
         screenResolution: '375x812',
       );
 
-      // Simulate what UmamiClient._send builds
       final payload = <String, dynamic>{
         'website': 'test-site',
         'hostname': 'testapp',
@@ -214,21 +249,21 @@ void main() {
 
       expect(decoded['type'], equals('event'));
 
-      final decodedPayload = decoded['payload'] as Map<String, dynamic>;
-      expect(decodedPayload['website'], equals('test-site'));
-      expect(decodedPayload['hostname'], equals('testapp'));
-      expect(decodedPayload['url'], equals('/HomeScreen'));
-      expect(decodedPayload['title'], equals('HomeScreen'));
-      expect(decodedPayload['screen'], equals('375x812'));
-      expect(decodedPayload['language'], equals('en_US'));
-      expect(decodedPayload['id'], equals('dev-123'));
+      final p = decoded['payload'] as Map<String, dynamic>;
+      expect(p['website'], equals('test-site'));
+      expect(p['hostname'], equals('testapp'));
+      expect(p['url'], equals('/HomeScreen'));
+      expect(p['title'], equals('HomeScreen'));
+      expect(p['screen'], equals('375x812'));
+      expect(p['language'], equals('en_US'));
+      expect(p['id'], equals('dev-123'));
     });
 
     test('event payload includes name and data for custom events', () {
       final payload = <String, dynamic>{
         'website': 'test-site',
         'hostname': 'testapp',
-        'url': '/',
+        'url': '/HomeScreen',
         'title': 'purchase',
         'screen': '375x812',
         'language': 'en_US',
@@ -239,12 +274,33 @@ void main() {
 
       final body = jsonEncode({'type': 'event', 'payload': payload});
       final decoded = jsonDecode(body) as Map<String, dynamic>;
-      final decodedPayload = decoded['payload'] as Map<String, dynamic>;
+      final p = decoded['payload'] as Map<String, dynamic>;
 
-      expect(decodedPayload['name'], equals('purchase'));
-      expect(decodedPayload['data'], isA<Map>());
-      expect((decodedPayload['data'] as Map)['plan'], equals('pro'));
-      expect((decodedPayload['data'] as Map)['price'], equals(9.99));
+      expect(p['name'], equals('purchase'));
+      expect(p['data'], isA<Map>());
+      expect((p['data'] as Map)['plan'], equals('pro'));
+      expect((p['data'] as Map)['price'], equals(9.99));
+    });
+
+    test('event url uses current screen not root', () {
+      // Events should be associated with the last tracked screen, not '/'.
+      final payload = <String, dynamic>{
+        'website': 'test-site',
+        'hostname': 'testapp',
+        'url': '/HomeScreen',
+        'title': 'button_tap',
+        'name': 'button_tap',
+        'screen': '375x812',
+        'language': 'en_US',
+        'id': 'dev-123',
+      };
+
+      final p =
+          (jsonDecode(jsonEncode({'type': 'event', 'payload': payload}))
+                  as Map<String, dynamic>)['payload']
+              as Map<String, dynamic>;
+
+      expect(p['url'], equals('/HomeScreen'));
     });
   });
 }

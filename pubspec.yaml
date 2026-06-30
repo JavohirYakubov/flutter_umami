@@ -1,8 +1,8 @@
 name: umami_flutter
 description: A lightweight Flutter package for Umami analytics with non-blocking initialization and automatic device info collection.
 version: 0.2.0
-repository: https://github.com/hamzache497/flutter_umami.git
-homepage: https://github.com/hamzache497/flutter_umami
+repository: https://github.com/JavohirYakubov/flutter_umami.git
+homepage: https://github.com/JavohirYakubov/flutter_umami
 
 environment:
   sdk: ^3.7.2
@@ -19,10 +19,10 @@ dependencies:
   flutter:
     sdk: flutter
   http: ">=1.1.0 <2.0.0"
-  device_info_plus: ">=9.0.0 <13.0.0"
+  device_info_plus: ">=9.0.0 <14.0.0"
   android_id: ">=0.3.0 <1.0.0"
   flutter_secure_storage: ">=8.0.0 <11.0.0"
-  uuid: ">=3.0.0 <5.0.0"
+  uuid: ">=4.0.0 <5.0.0"
 
 dev_dependencies:
   flutter_test:

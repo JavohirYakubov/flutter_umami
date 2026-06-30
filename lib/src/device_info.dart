@@ -15,6 +15,17 @@ class DeviceInfo {
   });
 
   @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeviceInfo &&
+          deviceId == other.deviceId &&
+          locale == other.locale &&
+          screenResolution == other.screenResolution;
+
+  @override
+  int get hashCode => Object.hash(deviceId, locale, screenResolution);
+
+  @override
   String toString() =>
       'DeviceInfo(deviceId: $deviceId, locale: $locale, screen: $screenResolution)';
 }
